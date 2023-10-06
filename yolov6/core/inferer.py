@@ -20,6 +20,7 @@ from yolov6.data.datasets import LoadData
 from yolov6.utils.nms import non_max_suppression
 from yolov6.utils.torch_utils import get_model_info
 
+
 class Inferer:
     def __init__(self, source, webcam, webcam_addr, weights, device, yaml, img_size, half):
 
@@ -28,11 +29,11 @@ class Inferer:
         # Init model
         self.device = device
         self.img_size = img_size
-        cuda = self.device != 'cpu' and torch.cuda.is_available()
-        self.device = torch.device(f'cuda:{device}' if cuda else 'cpu')
+        cuda = self.device != "cpu" and torch.cuda.is_available()
+        self.device = torch.device(f"cuda:{device}" if cuda else "cpu")
         self.model = DetectBackend(weights, device=self.device)
         self.stride = self.model.stride
-        self.class_names = load_yaml(yaml)['names']
+        self.class_names = load_yaml(yaml)["names"]
         self.img_size = self.check_img_size(self.img_size, s=self.stride)  # check image size
         self.half = half
 
@@ -40,14 +41,18 @@ class Inferer:
         self.model_switch(self.model.model, self.img_size)
 
         # Half precision
-        if self.half & (self.device.type != 'cpu'):
+        if self.half & (self.device.type != "cpu"):
             self.model.model.half()
         else:
             self.model.model.float()
             self.half = False
 
-        if self.device.type != 'cpu':
-            self.model(torch.zeros(1, 3, *self.img_size).to(self.device).type_as(next(self.model.model.parameters())))  # warmup
+        if self.device.type != "cpu":
+            self.model(
+                torch.zeros(1, 3, *self.img_size)
+                .to(self.device)
+                .type_as(next(self.model.model.parameters()))
+            )  # warmup
 
         # Load data
         self.webcam = webcam
@@ -55,20 +60,35 @@ class Inferer:
         self.files = LoadData(source, webcam, webcam_addr)
         self.source = source
 
-
     def model_switch(self, model, img_size):
-        ''' Model switch to deploy status '''
+        """Model switch to deploy status"""
         from yolov6.layers.common import RepVGGBlock
+
         for layer in model.modules():
             if isinstance(layer, RepVGGBlock):
                 layer.switch_to_deploy()
-            elif isinstance(layer, torch.nn.Upsample) and not hasattr(layer, 'recompute_scale_factor'):
+            elif isinstance(layer, torch.nn.Upsample) and not hasattr(
+                layer, "recompute_scale_factor"
+            ):
                 layer.recompute_scale_factor = None  # torch 1.11.0 compatibility
 
         LOGGER.info("Switch model to deploy modality.")
 
-    def infer(self, conf_thres, iou_thres, classes, agnostic_nms, max_det, save_dir, save_txt, save_img, hide_labels, hide_conf, view_img=True):
-        ''' Model Inference and results visualization '''
+    def infer(
+        self,
+        conf_thres,
+        iou_thres,
+        classes,
+        agnostic_nms,
+        max_det,
+        save_dir,
+        save_txt,
+        save_img,
+        hide_labels,
+        hide_conf,
+        view_img=True,
+    ):
+        """Model Inference and results visualization"""
         vid_path, vid_writer, windows = None, None, []
         fps_calculator = CalcFPS()
         for img_src, img_path, vid_cap in tqdm(self.files):
@@ -79,7 +99,9 @@ class Inferer:
                 # expand for batch dim
             t1 = time.time()
             pred_results = self.model(img)
-            det = non_max_suppression(pred_results, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)[0]
+            det = non_max_suppression(
+                pred_results, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det
+            )[0]
             t2 = time.time()
 
             if self.webcam:
@@ -89,30 +111,50 @@ class Inferer:
                 # Create output files in nested dirs that mirrors the structure of the images' dirs
                 rel_path = osp.relpath(osp.dirname(img_path), osp.dirname(self.source))
                 save_path = osp.join(save_dir, rel_path, osp.basename(img_path))  # im.jpg
-                txt_path = osp.join(save_dir, rel_path, 'labels', osp.splitext(osp.basename(img_path))[0])
+                txt_path = osp.join(
+                    save_dir, rel_path, "labels", osp.splitext(osp.basename(img_path))[0]
+                )
                 os.makedirs(osp.join(save_dir, rel_path), exist_ok=True)
 
             gn = torch.tensor(img_src.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             img_ori = img_src.copy()
 
             # check image and font
-            assert img_ori.data.contiguous, 'Image needs to be contiguous. Please apply to input images with np.ascontiguousarray(im).'
+            assert (
+                img_ori.data.contiguous
+            ), "Image needs to be contiguous. Please apply to input images with np.ascontiguousarray(im)."
             self.font_check()
 
             if len(det):
                 det[:, :4] = self.rescale(img.shape[2:], det[:, :4], img_src.shape).round()
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
-                        xywh = (self.box_convert(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        xywh = (
+                            (self.box_convert(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()
+                        )  # normalized xywh
                         line = (cls, *xywh, conf)
-                        with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                        with open(txt_path + ".txt", "a") as f:
+                            f.write(("%g " * len(line)).rstrip() % line + "\n")
 
                     if save_img:
                         class_num = int(cls)  # integer class
-                        label = None if hide_labels else (self.class_names[class_num] if hide_conf else f'{self.class_names[class_num]} {conf:.2f}')
+                        label = (
+                            None
+                            if hide_labels
+                            else (
+                                self.class_names[class_num]
+                                if hide_conf
+                                else f"{self.class_names[class_num]} {conf:.2f}"
+                            )
+                        )
 
-                        self.plot_box_and_label(img_ori, max(round(sum(img_ori.shape) / 2 * 0.003), 2), xyxy, label, color=self.generate_colors(class_num, True))
+                        self.plot_box_and_label(
+                            img_ori,
+                            max(round(sum(img_ori.shape) / 2 * 0.003), 2),
+                            xyxy,
+                            label,
+                            color=self.generate_colors(class_num, True),
+                        )
 
                 img_src = np.asarray(img_ori)
 
@@ -120,7 +162,7 @@ class Inferer:
             fps_calculator.update(1.0 / (t2 - t1))
             avg_fps = fps_calculator.accumulate()
 
-            if self.files.type == 'video':
+            if self.files.type == "video":
                 self.draw_text(
                     img_src,
                     f"FPS: {avg_fps:0.1f}",
@@ -134,14 +176,16 @@ class Inferer:
             if view_img:
                 if img_path not in windows:
                     windows.append(img_path)
-                    cv2.namedWindow(str(img_path), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
+                    cv2.namedWindow(
+                        str(img_path), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO
+                    )  # allow window resize (Linux)
                     cv2.resizeWindow(str(img_path), img_src.shape[1], img_src.shape[0])
                 cv2.imshow(str(img_path), img_src)
                 cv2.waitKey(1)  # 1 millisecond
 
             # Save results (image with detections)
             if save_img:
-                if self.files.type == 'image':
+                if self.files.type == "image":
                     cv2.imwrite(save_path, img_src)
                 else:  # 'video' or 'stream'
                     if vid_path != save_path:  # new video
@@ -154,13 +198,17 @@ class Inferer:
                             h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                         else:  # stream
                             fps, w, h = 30, img_ori.shape[1], img_ori.shape[0]
-                        save_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix on results videos
-                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+                        save_path = str(
+                            Path(save_path).with_suffix(".mp4")
+                        )  # force *.mp4 suffix on results videos
+                        vid_writer = cv2.VideoWriter(
+                            save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h)
+                        )
                     vid_writer.write(img_src)
 
     @staticmethod
     def process_image(img_src, img_size, stride, half):
-        '''Process image before image inference.'''
+        """Process image before image inference."""
         image = letterbox(img_src, img_size, stride=stride)[0]
         # Convert
         image = image.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
@@ -172,9 +220,11 @@ class Inferer:
 
     @staticmethod
     def rescale(ori_shape, boxes, target_shape):
-        '''Rescale the output to the original image shape'''
+        """Rescale the output to the original image shape"""
         ratio = min(ori_shape[0] / target_shape[0], ori_shape[1] / target_shape[1])
-        padding = (ori_shape[1] - target_shape[1] * ratio) / 2, (ori_shape[0] - target_shape[0] * ratio) / 2
+        padding = (ori_shape[1] - target_shape[1] * ratio) / 2, (
+            ori_shape[0] - target_shape[0] * ratio
+        ) / 2
 
         boxes[:, [0, 2]] -= padding[0]
         boxes[:, [1, 3]] -= padding[1]
@@ -197,8 +247,10 @@ class Inferer:
             raise Exception(f"Unsupported type of img_size: {type(img_size)}")
 
         if new_size != img_size:
-            print(f'WARNING: --img-size {img_size} must be multiple of max stride {s}, updating to {new_size}')
-        return new_size if isinstance(img_size,list) else [new_size]*2
+            print(
+                f"WARNING: --img-size {img_size} must be multiple of max stride {s}, updating to {new_size}"
+            )
+        return new_size if isinstance(img_size, list) else [new_size] * 2
 
     def make_divisible(self, x, divisor):
         # Upward revision the value x to make it evenly divisible by the divisor.
@@ -237,23 +289,41 @@ class Inferer:
         return text_size
 
     @staticmethod
-    def plot_box_and_label(image, lw, box, label='', color=(128, 128, 128), txt_color=(255, 255, 255), font=cv2.FONT_HERSHEY_COMPLEX):
+    def plot_box_and_label(
+        image,
+        lw,
+        box,
+        label="",
+        color=(128, 128, 128),
+        txt_color=(255, 255, 255),
+        font=cv2.FONT_HERSHEY_COMPLEX,
+    ):
         # Add one xyxy box to image with label
         p1, p2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
         cv2.rectangle(image, p1, p2, color, thickness=lw, lineType=cv2.LINE_AA)
         if label:
             tf = max(lw - 1, 1)  # font thickness
-            w, h = cv2.getTextSize(label, 0, fontScale=lw / 3, thickness=tf)[0]  # text width, height
+            w, h = cv2.getTextSize(label, 0, fontScale=lw / 3, thickness=tf)[
+                0
+            ]  # text width, height
             outside = p1[1] - h - 3 >= 0  # label fits outside box
             p2 = p1[0] + w, p1[1] - h - 3 if outside else p1[1] + h + 3
             cv2.rectangle(image, p1, p2, color, -1, cv2.LINE_AA)  # filled
-            cv2.putText(image, label, (p1[0], p1[1] - 2 if outside else p1[1] + h + 2), font, lw / 3, txt_color,
-                        thickness=tf, lineType=cv2.LINE_AA)
+            cv2.putText(
+                image,
+                label,
+                (p1[0], p1[1] - 2 if outside else p1[1] + h + 2),
+                font,
+                lw / 3,
+                txt_color,
+                thickness=tf,
+                lineType=cv2.LINE_AA,
+            )
 
     @staticmethod
-    def font_check(font='./yolov6/utils/Arial.ttf', size=10):
+    def font_check(font="./yolov6/utils/Arial.ttf", size=10):
         # Return a PIL TrueType Font, downloading to CONFIG_DIR if necessary
-        assert osp.exists(font), f'font path not exists: {font}'
+        assert osp.exists(font), f"font path not exists: {font}"
         try:
             return ImageFont.truetype(str(font) if font.exists() else font.name, size)
         except Exception as e:  # download if missing
@@ -271,15 +341,36 @@ class Inferer:
 
     @staticmethod
     def generate_colors(i, bgr=False):
-        hex = ('FF3838', 'FF9D97', 'FF701F', 'FFB21D', 'CFD231', '48F90A', '92CC17', '3DDB86', '1A9334', '00D4BB',
-               '2C99A8', '00C2FF', '344593', '6473FF', '0018EC', '8438FF', '520085', 'CB38FF', 'FF95C8', 'FF37C7')
+        hex = (
+            "FF3838",
+            "FF9D97",
+            "FF701F",
+            "FFB21D",
+            "CFD231",
+            "48F90A",
+            "92CC17",
+            "3DDB86",
+            "1A9334",
+            "00D4BB",
+            "2C99A8",
+            "00C2FF",
+            "344593",
+            "6473FF",
+            "0018EC",
+            "8438FF",
+            "520085",
+            "CB38FF",
+            "FF95C8",
+            "FF37C7",
+        )
         palette = []
         for iter in hex:
-            h = '#' + iter
-            palette.append(tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4)))
+            h = "#" + iter
+            palette.append(tuple(int(h[1 + i : 1 + i + 2], 16) for i in (0, 2, 4)))
         num = len(palette)
         color = palette[int(i) % num]
         return (color[2], color[1], color[0]) if bgr else color
+
 
 class CalcFPS:
     def __init__(self, nsamples: int = 50):
